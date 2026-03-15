@@ -11,7 +11,6 @@
 // project constants and pin definitions
 #include "constants.h"
 
-
 // physical objects
 Bounce forwardBtn = Bounce();
 Bounce backBtn = Bounce();
@@ -26,18 +25,12 @@ unsigned long ledBlinkTimer = 0;
 // helper that stores last reported battery percent so we don't spam BLE
 uint8_t lastBatteryPercent = 0;
 
-// connection management
-unsigned long connectionCheckTimer = 0;
-
 bool isConnected = false;
 
 // timer for battery updates
 unsigned long lastBatteryUpdate = 0;
 
-
-NimBLECharacteristic *pMidiNoteOnCharacteristic = nullptr;
-NimBLECharacteristic *pMidiNoteOffCharacteristic = nullptr;
-NimBLECharacteristic *pMidiChannelCharacteristic = nullptr;
+NimBLECharacteristic *pMidiCharacteristic = nullptr;
 NimBLECharacteristic *pBatteryLevelCharacteristic = nullptr;
 
 // Callback class for MIDI characteristics
@@ -47,30 +40,13 @@ struct MidiCallbacks : NimBLECharacteristicCallbacks
     {
         uint8_t channel = pCharacteristic->getValue()[0];
         uint8_t note = pCharacteristic->getValue()[1];
-
-        if (pCharacteristic == pMidiNoteOnCharacteristic)
-        {
-            uint8_t velocity = pCharacteristic->getValue()[2];
-            Serial.print("MIDI Note On: channel=");
-            Serial.print(channel);
-            Serial.print(", note=");
-            Serial.print(note);
-            Serial.print(", velocity=");
-            Serial.println(velocity);
-        }
-        else if (pCharacteristic == pMidiNoteOffCharacteristic)
-        {
-            Serial.print("MIDI Note Off: channel=");
-            Serial.print(channel);
-            uint8_t note = pCharacteristic->getValue()[1];
-            Serial.print(", note=");
-            Serial.println(note);
-        }
-        else if (pCharacteristic == pMidiChannelCharacteristic)
-        {
-            Serial.print("MIDI Channel: ");
-            Serial.println(channel);
-        }
+        uint8_t velocity = pCharacteristic->getValue()[2];
+        Serial.print("MIDI Note On: channel=");
+        Serial.print(channel);
+        Serial.print(", note=");
+        Serial.print(note);
+        Serial.print(", velocity=");
+        Serial.println(velocity);
     }
 };
 
@@ -89,10 +65,43 @@ struct BatteryCallbacks : NimBLECharacteristicCallbacks
     }
 };
 
+// Callback class for connection events
+struct ConnectionCallbacks : NimBLEServerCallbacks
+{
+    bool isConnected = false;
+
+    void onConnect(BLEServer *pServer, NimBLEConnInfo &connInfo) override
+    {
+        isConnected = true;
+        Serial.println("Client connected (callback)");
+
+        /**
+         *  We can use the connection handle here to ask for different connection parameters.
+         *  Args: connection handle, min connection interval, max connection interval
+         *  latency, supervision timeout.
+         *  Units; Min/Max Intervals: 1.25 millisecond increments.
+         *  Latency: number of intervals allowed to skip.
+         *  Timeout: 10 millisecond increments.
+         */
+        pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
+    }
+
+    void onDisconnect(BLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override
+    {
+        isConnected = false;
+        Serial.println("Client disconnected (callback)");
+    }
+};
+
 void setup()
 {
     Serial.begin(SERIAL_MONITOR_SPEED);
-    delay(100); // give debugger time to open
+    delay(1000); // give debugger time to open
+
+    // Register callbacks on characteristics using callback classes
+    static MidiCallbacks midiCallbacks;
+    static BatteryCallbacks batteryCallbacks;
+    static ConnectionCallbacks connectionCallbacks;
 
     // initialise BLE
     NimBLEDevice::init(DEVICE_NAME);
@@ -100,9 +109,7 @@ void setup()
     // Create BLE Server
     NimBLEServer *pServer = NimBLEDevice::createServer();
 
-    // Register callbacks on characteristics using callback classes
-    static MidiCallbacks midiCallbacks;
-    static BatteryCallbacks batteryCallbacks;
+    pServer->setCallbacks(&connectionCallbacks);
 
     // Create Battery Service
     NimBLEService *pBatteryService = pServer->createService(BATTERY_SERVICE_UUID);
@@ -119,42 +126,38 @@ void setup()
     pBatteryLevelCharacteristic->setCallbacks(&batteryCallbacks);
 
     // Start battery service BEFORE advertising so it's available to clients
-    pBatteryService->start();
+    // pBatteryService->start();
 
     // Create MIDI Service (must be started before advertising)
-    NimBLEService *pMidiService = pServer->createService(MIDI_NOTE_SERVICE_UUID);
+    NimBLEService *pMidiService = pServer->createService(MIDI_SERVICE_UUID);
 
-    // Create MIDI Note On characteristic
-    pMidiNoteOnCharacteristic = pMidiService->createCharacteristic(
-        MIDI_NOTE_ON_UUID,
-        NIMBLE_PROPERTY::WRITE |
+    pMidiCharacteristic = pMidiService->createCharacteristic(
+        MIDI_CHARACTERISTIC_UUID,
+        NIMBLE_PROPERTY::READ |
+            NIMBLE_PROPERTY::WRITE |
+            NIMBLE_PROPERTY::NOTIFY |
             NIMBLE_PROPERTY::WRITE_NR);
-    pMidiNoteOnCharacteristic->setCallbacks(&midiCallbacks);
+    pMidiCharacteristic->setCallbacks(&midiCallbacks);
 
-    // Create MIDI Note Off characteristic
-    pMidiNoteOffCharacteristic = pMidiService->createCharacteristic(
-        MIDI_NOTE_OFF_UUID,
-        NIMBLE_PROPERTY::WRITE |
-            NIMBLE_PROPERTY::WRITE_NR);
-    pMidiNoteOffCharacteristic->setCallbacks(&midiCallbacks);
-
-    // Create MIDI Channel characteristic
-    pMidiChannelCharacteristic = pMidiService->createCharacteristic(
-        MIDI_CHANNEL_UUID,
-        NIMBLE_PROPERTY::WRITE |
-            NIMBLE_PROPERTY::WRITE_NR);
-    pMidiChannelCharacteristic->setCallbacks(&midiCallbacks);
+    // Add 2904 descriptor for UTF8 string formatting (special UUID handling)
+    NimBLE2904 *pMidi2904 = pMidiCharacteristic->create2904();
+    pMidi2904->setFormat(NimBLE2904::FORMAT_UTF8);
 
     pMidiService->start();
 
-    // --- 3. Advertising ---
+    // --- 4. Advertising ---
     NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(MIDI_NOTE_SERVICE_UUID);
-    pAdvertising->addServiceUUID(BATTERY_SERVICE_UUID);
+    pAdvertising->addServiceUUID(pMidiService->getUUID());
+    // pAdvertising->addServiceUUID(pBatteryService->getUUID());
+    // pAdvertising->setName(DEVICE_NAME);
+    pAdvertising->setAppearance(0x41);      // MIDI Device
+    pAdvertising->enableScanResponse(true); // Enable scan response for proper BLE behavior
     pAdvertising->start();
 
-    // Initialize battery update timer
-    lastBatteryUpdate = millis();
+    NimBLEAddress mac = NimBLEDevice::getAddress();
+    Serial.print("BLE MAC: ");
+    Serial.print(mac.toString().c_str());
+    Serial.println();
 
     Serial.println("setup() completed");
 }
@@ -162,11 +165,11 @@ void setup()
 // Send MIDI note via BLE characteristic
 void sendMidiNoteOn(uint8_t channel, uint8_t note, uint8_t velocity)
 {
-    if (pMidiNoteOnCharacteristic && isConnected)
+    if (isConnected)
     {
         uint8_t data[3] = {channel, note, velocity};
-        pMidiNoteOnCharacteristic->setValue(data, 3);
-        pMidiNoteOnCharacteristic->notify();
+        pMidiCharacteristic->setValue(data, 3);
+        pMidiCharacteristic->notify();
         Serial.print("Sent MIDI Note On: ch=");
         Serial.print(channel);
         Serial.print(", note=");
@@ -180,11 +183,11 @@ void sendMidiNoteOn(uint8_t channel, uint8_t note, uint8_t velocity)
 
 void sendMidiNoteOff(uint8_t channel, uint8_t note, uint8_t velocity)
 {
-    if (pMidiNoteOffCharacteristic && isConnected)
+    if (isConnected)
     {
         uint8_t data[3] = {channel, note, velocity};
-        pMidiNoteOffCharacteristic->setValue(data, 3);
-        pMidiNoteOffCharacteristic->notify();
+        pMidiCharacteristic->setValue(data, 3);
+        pMidiCharacteristic->notify();
         Serial.print("Sent MIDI Note Off: ch=");
         Serial.print(channel);
         Serial.println(", note=");
@@ -209,24 +212,6 @@ void loop()
     forwardBtn.update();
     backBtn.update();
 
-    // Check connection state periodically (new NimBLE API)
-    if (millis() - connectionCheckTimer > CONNECTION_CHECK_INTERVAL)
-    {
-        connectionCheckTimer = millis();
-        
-        NimBLEServer *pServer = NimBLEDevice::getServer();
-        if (pServer && pServer->getConnectedCount() > 0)
-        {
-            isConnected = true;
-            Serial.println("Client connected");
-        }
-        else
-        {
-            isConnected = false;
-            Serial.println("No client connected");
-        }
-    }
-
     // forward pad pressed (falling edge)
     if (forwardBtn.fell())
     {
@@ -243,7 +228,7 @@ void loop()
 
     // periodically sample battery and push level to host (adaptive interval)
     if (gaugePresent && isConnected)
-    {                                         // only update when connected
+    { // only update when connected
         unsigned long t = millis();
         if ((t - lastBatteryUpdate) > BATTERY_UPDATE_INTERVAL) // every 60s
         {
