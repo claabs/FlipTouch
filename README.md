@@ -1,9 +1,8 @@
-# flipTurnTouch
+# FlipTouch
 
-This repository started life as a foot‑switch driven page‑turner; it has been forked and adapted for a two‑pad, single‑colour design using an Adafruit ESP32‑S3 Feather.
+FlipTouch is a capacitive touch input Bluetooth page turner for music reading apps.
 
-The hardware still emulates a BT‑105‑series Airturn device by sending simple keyboard commands over the BLE Keyboard profile, but the user interface has been changed as follows:
-
+* **MIDI BLE** - sends page turn commands over MIDI to avoid on-screen keyboard conflicts with HID keyboard style page turners.
 * **Two capacitive touch pads** – one for forward (page down) and one for back (page up).
 * **Single‑colour status LED** – flashes when unpaired, stays solid when connected.
 * **Battery monitoring via an Adafruit MAX1704x LiPo fuel gauge** – percentage is reported over the BLE battery level characteristic.
@@ -11,7 +10,7 @@ The hardware still emulates a BT‑105‑series Airturn device by sending simple
 
 ## Operation
 
-Forward pad press sends a page‑forward key (down‑arrow by default); back pad sends a page‑back key (up‑arrow).  No special BLE pairing button is required – the controller advertises as a keyboard and the host handles any bonding.
+Forward pad press sends a page‑forward key (MIDI C4); back pad sends a page‑back key (MIDI C3).  No special BLE pairing button is required – the controller connects to any host device that requests it.
 
 Battery percentage is continuously updated to the central device; many music apps display this automatically once the keyboard is connected.
 
@@ -36,7 +35,3 @@ Battery percentage is continuously updated to the central device; many music app
 * Flashing when BLE status is unpaired (500 ms on/off)
 * Solid when BLE status is actively paired
 
-## Licence
-***Software:*** [GPL v2 Licence](./LICENSE.txt)
-
-[![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](https://www.gnu.org/licenses/gpl-2.0)
