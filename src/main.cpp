@@ -10,6 +10,8 @@ Adafruit_MAX17048 fuelGauge;
 // Touch sensor debouncing - simple timer-based debounce
 unsigned long lastForwardPressTime = 0;
 unsigned long lastBackPressTime = 0;
+bool forwardPressed = false;
+bool backPressed = false;
 
 unsigned long ledBlinkTimer = 0;
 
@@ -18,50 +20,16 @@ unsigned long lastBatteryUpdate = 0;
 
 BleGamepad bleGamepad(DEVICE_NAME, VENDOR_NAME);
 
-// Helper to send a complete button event (on + off)
-void sendButtonPress(uint8_t button)
-{
-    bleGamepad.press(button);
-    delay(BUTTON_PRESS_LENGTH);
-    bleGamepad.release(button);
-}
-
-void forwardTouch()
-{
-    // Debounce: only trigger if enough time has passed since last press
-    unsigned long now = millis();
-    if ((now - lastForwardPressTime) > TOUCH_DEBOUNCE_WINDOW)
-    {
-        sendButtonPress(DPAD_RIGHT);
-        Serial.println("forward pressed -> page forward");
-        lastForwardPressTime = now;
-    }
-}
-
-void backTouch()
-{
-    // Debounce: only trigger if enough time has passed since last press
-    unsigned long now = millis();
-    if ((now - lastBackPressTime) > TOUCH_DEBOUNCE_WINDOW)
-    {
-        sendButtonPress(DPAD_LEFT);
-        Serial.println("back pressed -> page backward");
-        lastBackPressTime = now;
-    }
-}
-
 void setup()
 {
     Serial.begin(SERIAL_MONITOR_SPEED);
     delay(1000); // give debugger time to open
 
-    bleGamepad.begin();
-
-    touchAttachInterrupt(FORWARD_PIN, forwardTouch, TOUCH_THRESHOLD);
-    touchAttachInterrupt(BACK_PIN, backTouch, TOUCH_THRESHOLD);
-
     pinMode(STATUS_LED_PIN, OUTPUT);
+    pinMode(FORWARD_PIN, INPUT);
+    pinMode(BACK_PIN, INPUT);
 
+    bleGamepad.begin();
     fuelGauge.begin();
 
     Serial.println("setup() completed");
@@ -69,11 +37,47 @@ void setup()
 
 void loop()
 {
+    unsigned long now = millis();
     if (bleGamepad.isConnected())
     {
+        touch_value_t forwardValue = touchRead(FORWARD_PIN); // must read to trigger interrupt
+        touch_value_t backValue = touchRead(BACK_PIN);
 
-        // every 60s
-        unsigned long now = millis();
+        // Uncomment to calibrate TOUCH_THRESHOLD
+        // Serial.print("Forward touch value: ");
+        // Serial.print(forwardValue);
+        // Serial.print(" | Back touch value: ");
+        // Serial.println(backValue);
+
+        if (forwardPressed && forwardValue <= TOUCH_THRESHOLD)
+        {
+            bleGamepad.release(DPAD_RIGHT);
+            Serial.println("forward button released");
+            forwardPressed = false;
+        }
+        if (!forwardPressed && forwardValue > TOUCH_THRESHOLD && now - lastForwardPressTime > TOUCH_DEBOUNCE_WINDOW)
+        {
+            bleGamepad.press(DPAD_RIGHT);
+            Serial.println("forward pressed -> page forward");
+            lastForwardPressTime = now;
+            forwardPressed = true;
+        }
+
+        if (backPressed && backValue <= TOUCH_THRESHOLD)
+        {
+            bleGamepad.release(DPAD_LEFT);
+            Serial.println("back button released");
+            backPressed = false;
+        }
+        if (!backPressed && backValue > TOUCH_THRESHOLD && now - lastBackPressTime > TOUCH_DEBOUNCE_WINDOW)
+        {
+            bleGamepad.press(DPAD_LEFT);
+            Serial.println("back pressed -> page backward");
+            lastBackPressTime = now;
+            backPressed = true;
+        }
+
+        // every 30s
         if ((now - lastBatteryUpdate) > BATTERY_UPDATE_INTERVAL)
         {
             float perc = fuelGauge.cellPercent(); // returns a float percentage
@@ -97,12 +101,12 @@ void loop()
             }
         }
 
-        // status LED: solid when connected, blink when not
+        // status LED: solid when connected
         digitalWrite(STATUS_LED_PIN, HIGH);
     }
     else
     {
-        unsigned long now = millis();
+        // If disconnected, blink LED
         if (((now / LED_BLINK_PERIOD) % 2) == 0)
         {
             digitalWrite(STATUS_LED_PIN, HIGH);

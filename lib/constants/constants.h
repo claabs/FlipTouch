@@ -24,13 +24,12 @@ const char *VENDOR_NAME = "claabs";    // BLE vendor name
 
 
 // Timing constants (milliseconds)
-constexpr unsigned long BATTERY_UPDATE_INTERVAL = 60000;  // Update battery every 60s
+constexpr unsigned long BATTERY_UPDATE_INTERVAL = 30000;  // Update battery every 30s
 constexpr unsigned long LED_BLINK_PERIOD = 500;           // LED blink period when disconnected
 
 // HID message timing (milliseconds)
-constexpr unsigned long BUTTON_PRESS_LENGTH = 50; // Delay between note on/off
-constexpr unsigned long TOUCH_DEBOUNCE_WINDOW = 100; // ms between button presses
-constexpr uint32_t  TOUCH_THRESHOLD = 50; // Touch threshold for ESP32 touch pins
+constexpr unsigned long TOUCH_DEBOUNCE_WINDOW = 200; // ms between button presses
+constexpr uint32_t  TOUCH_THRESHOLD = 25000; // Touch threshold for ESP32 touch pins
 
 
 // Small sleep to reduce CPU usage
