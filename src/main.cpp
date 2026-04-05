@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Adafruit_MAX1704X.h>
 #include <BleGamepad.h>
+#include <TouchHandler.h>
 
 // project constants and pin definitions
 #include "constants.h"
@@ -20,6 +21,9 @@ unsigned long lastBatteryUpdate = 0;
 
 BleGamepad bleGamepad(DEVICE_NAME, VENDOR_NAME);
 
+const int touchPins[2] = {FORWARD_PIN, BACK_PIN};
+TouchHandler touchHandler(touchPins, 2);
+
 void setup()
 {
     Serial.begin(SERIAL_MONITOR_SPEED);
@@ -28,6 +32,8 @@ void setup()
     pinMode(STATUS_LED_PIN, OUTPUT);
     pinMode(FORWARD_PIN, INPUT);
     pinMode(BACK_PIN, INPUT);
+
+    touchHandler.begin();
 
     bleGamepad.begin();
     fuelGauge.begin();
@@ -40,38 +46,44 @@ void loop()
     unsigned long now = millis();
     if (bleGamepad.isConnected())
     {
-        touch_value_t forwardValue = touchRead(FORWARD_PIN); // must read to trigger interrupt
-        touch_value_t backValue = touchRead(BACK_PIN);
+        touchHandler.update();
 
-        // Uncomment to calibrate TOUCH_THRESHOLD
-        // Serial.print("Forward touch value: ");
-        // Serial.print(forwardValue);
-        // Serial.print(" | Back touch value: ");
-        // Serial.println(backValue);
+        bool isForwardTouched = touchHandler.isTouched(0);
+        bool isBackTouched = touchHandler.isTouched(1);
 
-        if (forwardPressed && forwardValue <= TOUCH_THRESHOLD)
+        // Uncomment to view TOUCH_THRESHOLD
+        // Serial.print("Forward touched: ");
+        // Serial.print(isForwardTouched);
+        // Serial.print(" | ");
+        // Serial.print(touchHandler.getThreshold(0));
+        // Serial.print(" | Back touched: ");
+        // Serial.print(isBackTouched);
+        // Serial.print(" | ");
+        // Serial.println(touchHandler.getThreshold(1));
+
+        if (forwardPressed && !isForwardTouched)
         {
-            bleGamepad.release(DPAD_RIGHT);
+            bleGamepad.release(BUTTON_8); // right shoulder
             Serial.println("forward button released");
             forwardPressed = false;
         }
-        if (!forwardPressed && forwardValue > TOUCH_THRESHOLD && now - lastForwardPressTime > TOUCH_DEBOUNCE_WINDOW)
+        if (!forwardPressed && isForwardTouched && now - lastForwardPressTime > TOUCH_DEBOUNCE_WINDOW)
         {
-            bleGamepad.press(DPAD_RIGHT);
+            bleGamepad.press(BUTTON_8);
             Serial.println("forward pressed -> page forward");
             lastForwardPressTime = now;
             forwardPressed = true;
         }
 
-        if (backPressed && backValue <= TOUCH_THRESHOLD)
+        if (backPressed && !isBackTouched)
         {
-            bleGamepad.release(DPAD_LEFT);
+            bleGamepad.release(BUTTON_7); // left shoulder
             Serial.println("back button released");
             backPressed = false;
         }
-        if (!backPressed && backValue > TOUCH_THRESHOLD && now - lastBackPressTime > TOUCH_DEBOUNCE_WINDOW)
+        if (!backPressed && isBackTouched && now - lastBackPressTime > TOUCH_DEBOUNCE_WINDOW)
         {
-            bleGamepad.press(DPAD_LEFT);
+            bleGamepad.press(BUTTON_7);
             Serial.println("back pressed -> page backward");
             lastBackPressTime = now;
             backPressed = true;
